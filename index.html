@@ -377,6 +377,17 @@
         .msg-in.group-mid { border-top-left-radius: 4px; border-bottom-left-radius: 4px; margin-bottom: 2px; }
         .msg-in.group-bot { border-top-left-radius: 4px; margin-top: 0; }
 
+        .msg-media { display: block; margin: -4px -8px 6px; border-radius: 12px; overflow: hidden; max-width: min(320px, 100%); position: relative; background: rgba(0,0,0,0.08); }
+        .msg-media img, video.msg-media { display: block; width: 100%; max-height: 420px; object-fit: cover; }
+        video.msg-media { margin: -4px -8px 6px; }
+        .msg-video-thumb img { filter: brightness(0.75); }
+        .msg-video-thumb .material-symbols-rounded { position: absolute; inset: 0; margin: auto; width: 48px; height: 48px; font-size: 48px; color: #fff; }
+        .msg-audio { width: 260px; max-width: 100%; height: 40px; margin-bottom: 4px; }
+        .msg-doc { display: flex; align-items: center; gap: 8px; padding: 8px 10px; margin-bottom: 4px; border-radius: 10px; background: rgba(0,0,0,0.08); color: inherit; text-decoration: none; font-weight: 600; word-break: break-word; }
+        .msg-media-missing { font-size: 13px; opacity: 0.8; font-style: italic; margin-bottom: 2px; }
+        .msg-media-missing span { font-size: 11px; opacity: 0.8; }
+        .msg-bubble.msg-sticker { background: transparent !important; box-shadow: none; padding: 0; }
+        .msg-sticker-img { width: 140px; height: 140px; object-fit: contain; }
         .msg-sender { font-size: 12px; font-weight: 700; color: var(--md-sys-color-primary); margin-bottom: 2px; }
         .msg-text { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
         .msg-meta { font-size: 10px; opacity: 0.7; align-self: flex-end; margin-top: 2px; }
@@ -1989,6 +2000,42 @@
             }
         }
 
+        // --- MEDIA RENDERING ---
+        function mediaURL(m, thumb) {
+            const token = localStorage.getItem('wp_api_token');
+            return `${RENDER_BACKEND_URL}/api/media?chatId=${encodeURIComponent(m.senderId)}&id=${encodeURIComponent(m.id)}&token=${encodeURIComponent(token)}${thumb ? '&thumb=1' : ''}`;
+        }
+
+        function renderMediaHTML(m) {
+            if (!m.mediaType || !m.senderId || !m.id) return '';
+            const label = escapeHTML(m.mediaLabel || 'Media');
+            const missing = (note) => `<div class="msg-media-missing">${label}${note ? ` <span>(${note})</span>` : ''}</div>`;
+
+            if (!m.mediaStored && !m.mediaThumb) return missing('not saved');
+            const full = escapeHTML(mediaURL(m, false));
+            const thumb = escapeHTML(mediaURL(m, true));
+
+            switch (m.mediaType) {
+                case 'image':
+                    return m.mediaStored
+                        ? `<a class="msg-media" href="${full}" target="_blank" rel="noopener"><img src="${full}" loading="lazy" alt="Photo"></a>`
+                        : `<div class="msg-media"><img src="${thumb}" loading="lazy" alt="Photo"></div>${missing('preview only')}`;
+                case 'sticker':
+                    return `<img class="msg-sticker-img" src="${full}" loading="lazy" alt="Sticker">`;
+                case 'audio':
+                    return `<audio class="msg-audio" controls preload="none" src="${full}"></audio>`;
+                case 'video':
+                    return m.mediaStored
+                        ? `<video class="msg-media" controls preload="none" playsinline src="${full}"${m.mediaThumb ? ` poster="${thumb}"` : ''}></video>`
+                        : `<div class="msg-media msg-video-thumb"><img src="${thumb}" loading="lazy" alt="Video"><span class="material-symbols-rounded">play_circle</span></div>${missing('too large – preview only')}`;
+                case 'document':
+                    return m.mediaStored
+                        ? `<a class="msg-doc" href="${full}" target="_blank" rel="noopener"><span class="material-symbols-rounded">description</span><span>${label.replace(/^📄\s*/, '')}</span></a>`
+                        : missing('too large');
+            }
+            return missing('');
+        }
+
         function renderMsgs(map) {
             const container = document.getElementById('messagesContainer');
             container.innerHTML = '';
@@ -2030,7 +2077,11 @@
                 const urlRegex = /(https?:\/\/[^\s]+)/g;
                 const formattedText = safeText ? safeText.replace(urlRegex, url => `<a href="${url}" target="_blank" rel="noopener noreferrer" style="color: inherit; text-decoration: underline; font-weight: 600;">${url}</a>`) : '';
 
-                div.innerHTML = `${showSenderName ? `<div class="msg-sender">${escapeHTML(m.senderName)}</div>` : ''}<div class="msg-text">${formattedText || 'Media'}</div><div class="msg-meta">${date.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</div>`;
+                const mediaHtml = renderMediaHTML(m);
+                const textHtml = (m.mediaType && !m.hasCaption && mediaHtml) ? '' : `<div class="msg-text">${formattedText || 'Media'}</div>`;
+                if (m.mediaType === 'sticker' && m.mediaStored) div.classList.add('msg-sticker');
+
+                div.innerHTML = `${showSenderName ? `<div class="msg-sender">${escapeHTML(m.senderName)}</div>` : ''}${mediaHtml}${textHtml}<div class="msg-meta">${date.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</div>`;
                 if (currentGroup) currentGroup.appendChild(div);
             });
 
