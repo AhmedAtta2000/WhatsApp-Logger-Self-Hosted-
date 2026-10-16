@@ -1,4 +1,4 @@
-const CACHE_NAME = 'walogger-4.2.3-media1'; // Incremented to trigger an update
+const CACHE_NAME = 'walogger-4.2.3-media2'; // Incremented to trigger an update
 const FONT_CACHE = 'walogger-fonts-4.2.3'; // New cache specifically for offline Google Fonts
 const ASSETS = [
     './',
@@ -52,10 +52,18 @@ self.addEventListener('fetch', (e) => {
                 });
             })
         );
-    } else {
-        // Standard Strategy for app files
+    } else if (url.origin === self.location.origin && e.request.method === 'GET') {
+        // App files: network-first so updates show up on the next load,
+        // falling back to the cached copy when offline.
         e.respondWith(
-            caches.match(e.request).then(response => response || fetch(e.request))
+            fetch(e.request, { cache: 'no-cache' }).then(networkResponse => {
+                if (networkResponse.ok) {
+                    const copy = networkResponse.clone();
+                    caches.open(CACHE_NAME).then(cache => cache.put(e.request, copy));
+                }
+                return networkResponse;
+            }).catch(() => caches.match(e.request).then(r => r || caches.match('./index.html')))
         );
     }
+    // Backend requests (API, SSE streams, media) go straight to the network.
 });
