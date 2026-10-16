@@ -3,6 +3,7 @@ const { db } = require('../firebase');
 const { chatsCache, messagesCache, isCacheReady } = require('../cache');
 const { clients, enforceConnectionCeiling } = require('../sseManager');
 const { verifyApiToken } = require('../auth');
+const { mediaDocId } = require('../media');
 
 const router = express.Router();
 
@@ -186,6 +187,34 @@ router.get('/api/export/messages', verifyApiToken, async (req, res) => {
         const msgMap = messagesCache.get(chatId);
         const messages = msgMap ? Array.from(msgMap.values()) : [];
         res.json({ chatId, messages });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// --- API: Media ---
+// Serves a stored photo / sticker / voice note / video / document, or its
+// thumbnail with ?thumb=1. Token comes via ?token= so it works in <img src>.
+router.get('/api/media', verifyApiToken, async (req, res) => {
+    const { chatId, id, thumb } = req.query;
+    if (!chatId || !id) return res.status(400).json({ error: 'Missing parameters' });
+
+    try {
+        const snap = await db.collection('Media').doc(mediaDocId(chatId, id)).get();
+        if (!snap.exists) return res.status(404).json({ error: 'Not found' });
+
+        const media = snap.data();
+        const useThumb = thumb === '1' || !media.data;
+        const bytes = useThumb ? media.thumb : media.data;
+        if (!bytes) return res.status(404).json({ error: 'Not found' });
+
+        const buffer = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes.toUint8Array ? bytes.toUint8Array() : bytes);
+        res.set('Content-Type', useThumb ? 'image/jpeg' : (media.mimetype || 'application/octet-stream'));
+        res.set('Cache-Control', 'private, max-age=31536000, immutable');
+        if (!useThumb && media.type === 'document' && media.fileName) {
+            res.set('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(media.fileName)}`);
+        }
+        res.send(buffer);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }

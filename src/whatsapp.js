@@ -6,6 +6,7 @@ const {
 const pino = require('pino');
 const { db } = require('./firebase');
 const { useFirestoreAuthState } = require('./authState');
+const { getMediaInfo, saveMedia } = require('./media');
 
 // --- BAILEYS SETUP ---
 let qrCodeData = null;
@@ -114,14 +115,30 @@ async function startWhatsApp() {
                 const remoteJid = msg.key.remoteJid;
                 if (remoteJid === 'status@broadcast') continue;
 
-                const textContent =
-                    msg.message.conversation ||
-                    msg.message.extendedTextMessage?.text ||
-                    msg.message.imageMessage?.caption ||
-                    msg.message.videoMessage?.caption ||
+                const mediaInfo = getMediaInfo(msg.message);
+                const content = mediaInfo ? mediaInfo.content : msg.message;
+
+                let textContent =
+                    content.conversation ||
+                    content.extendedTextMessage?.text ||
+                    (mediaInfo && mediaInfo.caption) ||
                     "";
 
-                if (!textContent) continue;
+                if (!textContent && !mediaInfo) continue;
+
+                let mediaFields = {};
+                if (mediaInfo) {
+                    const result = await saveMedia(sock, msg, mediaInfo, remoteJid);
+                    mediaFields = {
+                        mediaType: mediaInfo.type,
+                        mediaLabel: mediaInfo.label,
+                        hasCaption: !!mediaInfo.caption,
+                        mediaStored: result.stored,
+                        mediaThumb: result.thumb
+                    };
+                    if (!textContent) textContent = mediaInfo.label;
+                    console.log(`Media: ${mediaInfo.label} in ${remoteJid} — ${result.stored ? `saved (${Math.round(result.size / 1024)} KB)` : result.thumb ? 'thumbnail only' : 'not saved'}`);
+                }
 
                 const timestamp = msg.messageTimestamp
                     ? (typeof msg.messageTimestamp === 'number' ? msg.messageTimestamp : msg.messageTimestamp.low)
@@ -148,7 +165,8 @@ async function startWhatsApp() {
                         senderName: senderName,
                         timestamp: timestamp,
                         fromMe: isFromMe,
-                        id: msg.key.id
+                        id: msg.key.id,
+                        ...mediaFields
                     }, { merge: true });
 
             } catch (err) {}
